@@ -64,3 +64,27 @@ The full-top TestHarness → ERS ↔ SimAXIMem circular instance dependency (bid
 3. Verilator: legally prunes entire design downstream of constants
 
 Individual modules (CSRFile, LFSR, etc.) work perfectly through all paths.
+
+## Final Status (2026-11-13 18:45)
+
+### VerilogEmitter bugs fixed this session (pyCircuit-dev worktree):
+1. Verilog-2001 keyword guard (isReservedVerilogKeyword, NameTable::unique `_w` suffix) — eliminates sed post-patching
+2. 1-bit extract/trunc/sext scalar passthrough — fixes "Illegal bit select on logic" errors
+
+### Full-top Path 3 blocker (FINAL diagnosis):
+The Verilog output is now syntactically correct (0 Verilator errors), structurally complete
+(SimAXIMem has 4 AXI4 child instances, AXI4RAM has 40 byte_mem), and properly connected
+(ERS memory ports on wires from SimAXIMem outputs). However, Verilator still prunes to
+544 lines because:
+- Test bench drives empty/random inputs (no DTM protocol)
+- CPU never activates (no instruction fetch, no state change)
+- Verilator statically evaluates the design's fixed point and prunes idle logic
+
+This is a TEST METHODOLOGY issue, not a Verilog generation issue. The Chisel baseline
+works because it has a real SimDTM (with DPI-C) that implements the debug protocol,
+making the CPU active from cycle 1.
+
+### To unblock full-top Path 3:
+1. Implement a minimal DTM driver in the TB (like Chisel's SimDTM.cc)
+2. Or add boot ROM initialization to the design (CPU starts executing immediately)
+3. Or use --timing + --assert in Verilator to prevent aggressive static evaluation
