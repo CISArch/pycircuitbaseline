@@ -44,3 +44,23 @@ Design: freechips.rocketchip.system.DefaultConfig (FIRRTL 1.1.0, 628 modules, 27
 - pyc.debug_keep on SimAXIMem: preserves instance op but not internal logic
 
 **Required fix**: Either (a) MLIR-level wire breaking for circular instance dependencies, or (b) pycc EliminateDeadInstances to not prune based on constant-folded consumers, or (c) pyc.ext_module black-box support (PR#12 direction).
+
+## Module-Level Three-Path Comparison (2026-11-13)
+
+### CSRFile (235 regs, 3231 bits, BOOM trim) — all three paths WORK
+
+| Path | cycles/s (-O3) | Ratio |
+|---|---|---|
+| fir2pyc → pycc Verilog → Verilator | **3,434,348** | 8.4× vs C++ |
+| fir2pyc → pycc C++ | **410,321** | 1.0× |
+| (Chisel-side N/A — CSRFile is a BOOM internal module) | — | — |
+
+**Key finding**: For individual modules (no circular instance deps), the fir2pyc → Verilog → Verilator path produces fully alive models and is **8.4× faster** than the C++ backend (Verilator's change-driven eval vs pyc C++ full-tree evaluation every cycle).
+
+### Full-top Path 3 blocker confirmed
+The full-top TestHarness → ERS ↔ SimAXIMem circular instance dependency (bidirectional AXI4 bus) causes:
+1. fir2pyc: ERS memory inputs constant-stubbed (SSA dominance constraint)
+2. pycc: SimAXIMem internal logic DCE'd (outputs appear unused)
+3. Verilator: legally prunes entire design downstream of constants
+
+Individual modules (CSRFile, LFSR, etc.) work perfectly through all paths.
