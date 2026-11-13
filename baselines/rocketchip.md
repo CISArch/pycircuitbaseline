@@ -23,3 +23,24 @@ Design: freechips.rocketchip.system.DefaultConfig (FIRRTL 1.1.0, 628 modules, 27
 - .fir surgery: tools/fir_surgery.py (SimDTM extmodule → top-level ports)
 - MLIR: 586k lines, pyc-opt PASS, pycc --emit=cpp --no-state-opt --logic-depth 1024
 - C++: 56MB TU, g++ -O3 (2:44 compile, 3.79GB RSS)
+
+## Path 3 (fir2pyc → pycc Verilog → Verilator) — BLOCKED (2026-11-13)
+
+**Status**: Design pruned to empty shell by Verilator. Root cause chain:
+
+1. `.fir` has circular instance dependency: ERS (ldut) ↔ SimAXIMem (mem) — bidirectional AXI4 bus
+2. fir2pyc emits instances in .fir order → ERS first → ERS's memory input operands get constant stubs (SimAXIMem not yet in `inst_out_ssa`)
+3. pycc canonicalizer sees ERS memory inputs as constants → SimAXIMem outputs appear unused
+4. pycc EliminateDeadInstances removes SimAXIMem internal logic (debug_keep preserves the instance op but not the logic)
+5. Verilog output has correct structure but constant-stubbed memory connections
+6. Verilator legally prunes design tree downstream of constants
+
+**Attempted fixes** (all documented in session logs):
+- .fir surgery v3/v4: expand bidirectional aggregate connect to leaf connects ✅ (correct directions) but fir2pyc still can't emit ERS after SimAXIMem (operand count mismatch)
+- .fir reordering (mem before ldut): operand count mismatch in ERS instance
+- MLIR post-processing: too fragile (SSA name matching)
+- Verilog post-processing (rewiring): correct structure but internal logic already pruned
+- Two-phase instance emission in fir2pyc: SSA dominance violations in child modules
+- pyc.debug_keep on SimAXIMem: preserves instance op but not internal logic
+
+**Required fix**: Either (a) MLIR-level wire breaking for circular instance dependencies, or (b) pycc EliminateDeadInstances to not prune based on constant-folded consumers, or (c) pyc.ext_module black-box support (PR#12 direction).
